@@ -6,19 +6,21 @@ import os
 import re
 import logging
 
+# logging to show timestamps, logs and messages
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# class to store selectors
 class Selectors:
     MAIN_CATEGORY_LINK = "a[href='/electronics/b/?ie=UTF8&node=976419031&ref_=nav_cs_electronics']"
     SUB_CATEGORY = "li#sobe_d_b_ms_7_1 a.sl-sobe-carousel-sub-card-link"
     ALL_BRANDS = "#sobe_d_b_ms_4-carousel-viewport .sl-sobe-carousel-viewport-row ol.sl-sobe-carousel-viewport-row-inner li.sl-sobe-carousel-sub-card a"
-    BRAND_LINK = "a.sl-sobe-carousel-sub-card-link img[alt='HP']"
     ALL_ITEMS = ".s-main-slot .s-result-item"
     NAME_OF_ITEM = "h2.a-size-mini span"
     RATING_OF_ITEM = "span[aria-label*='out of 5 stars']"
     PRICE_OF_ITEM = ".a-price .a-offscreen"
     NEXT_BUTTON = ".s-pagination-next.s-pagination-button"
 
+# mimic different browsers
 def get_random_user_agent():
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -33,9 +35,8 @@ def extract_product_info(product):
     rating = product.query_selector(Selectors.RATING_OF_ITEM).get_attribute("aria-label") if product.query_selector(Selectors.RATING_OF_ITEM) else "No Rating"
     price = product.query_selector(Selectors.PRICE_OF_ITEM).inner_text() if product.query_selector(Selectors.PRICE_OF_ITEM) else "No Price"
     
-    # Exclude products with no price
     if price == "No Price":
-        return None  # Skip this product
+        return None 
     
     return {
         "name": name,
@@ -43,9 +44,9 @@ def extract_product_info(product):
         "price": price,
     }
 
-def save_data_to_csv(products, category, subcategory):
+def save_data_to_csv(products, category, subcategory,brand_name):
     """Save scraped product data to a CSV file."""
-    directory = f"data/{category}/{subcategory}"
+    directory = f"Data/{category}/{subcategory}/{brand_name}"
     os.makedirs(directory, exist_ok=True)
     
     csv_file = f"{directory}/products.csv"
@@ -57,7 +58,6 @@ def save_data_to_csv(products, category, subcategory):
     logging.info(f"Data saved to {csv_file}")
 
 def extract_category_and_subcategory(page):
-    """Extract the category and subcategory from the page."""
     category_element = page.query_selector(Selectors.MAIN_CATEGORY_LINK)
     category = category_element.inner_text() if category_element else "Unknown Category"
 
@@ -71,16 +71,16 @@ def extract_category_and_subcategory(page):
 
     return category, subcategory
 
+# main category
 def navigate_to_category(page):
-    """Navigate to the main category."""
     main_category = page.query_selector(Selectors.MAIN_CATEGORY_LINK)
     if main_category:
         main_category.click()
         logging.info("Navigating to main category")
         time.sleep(random.uniform(2, 5))
 
+# sub category
 def navigate_to_subcategory(page):
-    """Navigate to the subcategory."""
     sub_category = page.query_selector(Selectors.SUB_CATEGORY)
     if sub_category:
         sub_category.click()
@@ -91,8 +91,8 @@ def navigate_to_subcategory(page):
             page.evaluate("window.scrollBy(0, window.innerHeight);")
             time.sleep(random.uniform(2, 4))
 
+# brands page
 def navigate_to_brand_page(page, brand_link):
-    """Navigate to a specific brand's page."""
     try:
         if brand_link.is_visible() and brand_link.is_enabled():
             href = brand_link.get_attribute('href')
@@ -103,9 +103,8 @@ def navigate_to_brand_page(page, brand_link):
     except Exception as e:
         logging.error(f"Error navigating to brand page: {e}")
 
-
-def scrape_brand_products(page, category_name, subcategory_name, scraped_products):
-    """Scrape all products for a specific brand's page."""
+# scrape all brand's products
+def scrape_brand_products(page, category_name, subcategory_name, scraped_products,brand_name):
     brand_products = []
     while True:
         product_elements = page.query_selector_all(Selectors.ALL_ITEMS)
@@ -129,7 +128,7 @@ def scrape_brand_products(page, category_name, subcategory_name, scraped_product
             logging.info(f"Scraped product: {product_info}")
 
         # Save brand-specific data
-        save_data_to_csv(brand_products, category_name, subcategory_name)
+        save_data_to_csv(brand_products, category_name, subcategory_name,brand_name)
         brand_products = []
 
         # Check if there's a "Next" button for pagination
@@ -143,6 +142,7 @@ def scrape_brand_products(page, category_name, subcategory_name, scraped_product
             logging.info("No more pages to navigate.")
             break
 
+# for returning to brands page
 def go_back_to_brands_page(page, brand_listing_url):
     """Navigate directly to the brand list page and wait for brand links to load."""
     logging.info("Returning to the brand list after scraping products.")
@@ -157,6 +157,7 @@ def go_back_to_brands_page(page, brand_listing_url):
     except TimeoutError:
         logging.error("Timeout while navigating back to the brand listing page.")
 
+# scrape all brands 
 def scrape_all_brands(page, category_name, subcategory_name, scraped_products):
     """Scrape products for all brands in the brand listing page."""
     brand_listing_url = page.url
@@ -180,23 +181,20 @@ def scrape_all_brands(page, category_name, subcategory_name, scraped_products):
         for i in range(current_brand_index, len(brand_links)):
             brand_link = brand_links[i]
             try:
-                # Attempt to get the brand name from different attributes
-                brand_name = brand_link.get_attribute("alt") or brand_link.inner_text().strip()
+                # Extract the brand name from the 'alt' attribute of the image inside the anchor tag
+                brand_img = brand_link.query_selector("img")
+                brand_name = brand_img.get_attribute("alt") if brand_img else None
                 
-                # Fallback to use part of the href if no name is found
+                # If alt attribute is missing or empty, fallback to using the inner text or href
+                if not brand_name:
+                    brand_name = brand_link.inner_text().strip()  # fallback to inner text
                 if not brand_name:
                     brand_name = brand_link.get_attribute("href").split('/')[-1] if brand_link.get_attribute("href") else f"Brand_{i+1}"
-                
-                logging.info(f"Processing brand: {brand_name}")
-                # Check if the brand link is visible and clickable
-                if not brand_link.is_visible() or not brand_link.is_enabled():
-                    logging.warning(f"Brand link {i+1} is not visible or clickable, skipping.")
-                    continue
 
-                # Navigate to the brand page
+                logging.info(f"Processing brand Name: {brand_name}")
                 logging.info(f"Navigating to brand page {i + 1}")
                 navigate_to_brand_page(page, brand_link)
-                scrape_brand_products(page, category_name, subcategory_name, scraped_products)
+                scrape_brand_products(page, category_name, subcategory_name, scraped_products,brand_name)
 
                 # After scraping, increment the index and go back to the brand list
                 current_brand_index = i + 1  # Move to the next brand
@@ -212,9 +210,8 @@ def scrape_all_brands(page, category_name, subcategory_name, scraped_products):
             logging.info("All brands have been processed.")
             break
 
-
-def scrape_amazon_bestsellers(url):
-    """Main function to scrape Amazon bestsellers."""
+# main function to handle scraping
+def scrape_amazon(url):
     # Set to track products already scraped (by name)
     scraped_products = set()
 
@@ -224,7 +221,7 @@ def scrape_amazon_bestsellers(url):
         page = context.new_page()
 
         try:
-            page.goto(url, timeout=60000)  # Increased timeout
+            page.goto(url, timeout=60000)  
             time.sleep(random.uniform(2, 5))
 
             # Navigate to the category page
@@ -247,4 +244,4 @@ def scrape_amazon_bestsellers(url):
 
 if __name__ == "__main__":
     url = "https://www.amazon.in"
-    scrape_amazon_bestsellers(url) 
+    scrape_amazon(url)
